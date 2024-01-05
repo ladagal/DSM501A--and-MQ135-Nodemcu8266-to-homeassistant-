@@ -1,0 +1,38 @@
+
+
+template:
+
+  - sensor:
+  
+      - name: "PM10_Koncentrace"
+        unit_of_measurement: "mg/m3"
+        state: "{{(states('sensor.PM10_Konc'))  |round(0) }}"
+    
+      - name: "PM25_Koncentrace"
+        unit_of_measurement: "mg/m3"
+        state: "{{(states('sensor.PM25_Konc'))  |round(0) }}"
+
+      - name: "CO2_NOx_NH3_Koncentrace"
+        unit_of_measurement: "ppm"
+        state: "{{(states('sensor.CO2_NOx_NH3'))  |round(0) }}"
+        
+        
+mqtt:
+
+   sensor:
+
+  - name: "PM10 pomer"
+    state_topic: "tele/DSM501A/PM10_particle"
+  - name: "PM25 pomer"
+    state_topic: "tele/DSM501A/PM25_particle"
+  - name: "PM10_Konc"
+    state_topic: "tele/DSM501A/PM10_concentration"
+    unit_of_measurement: "mg/m3"
+  - name: "PM25_Konc"
+    state_topic: "tele/DSM501A/PM25_concentration"
+    unit_of_measurement: "mg/m3"   
+
+  - name: "CO2_NOx_NH3"
+    state_topic: "tele/MQ135/PPM_concentration"
+    unit_of_measurement: "ppm"   
+    
