@@ -10,9 +10,17 @@
 // inicializace senzoru z knihovny
 MQ135 senzorMQ = MQ135(pinA);
 
-#define DUST_SENSOR_DIGITAL_PIN_PM10 12 // DSM501 Pin 2 - ESP8266 GPIO12/D6
-#define DUST_SENSOR_DIGITAL_PIN_PM25 14 // DSM501 Pin 4 - ESP8266 GPIO14/D5 
-
+#include<string.h>
+#define PM1PIN 14
+#define PM25PIN 12
+byte buff[2];
+unsigned long durationPM1;
+unsigned long durationPM25;
+unsigned long starttime;
+unsigned long endtime;
+unsigned long sampletime_ms = 30000;
+unsigned long lowpulseoccupancyPM1 = 0;
+unsigned long lowpulseoccupancyPM25 = 0;
 
 char ssid[] = SECRET_SSID; // Wifi SSID , zapsat do secrets.h
 char pass[] = SECRET_PASS; // Heslo k Wifi zapsat do secrets.h
@@ -22,37 +30,25 @@ const char broker[] = MQTT_BROKER; // Adresa MQTT brokeru , zapsat do secrets.h
 
 int port = 1883;
 
-const char topicPM10p[] = "tele/DSM501A/PM10_particle";
 const char topicPM10c[] = "tele/DSM501A/PM10_concentration";
-const char topicPM25p[] = "tele/DSM501A/PM25_particle";
 const char topicPM25c[] = "tele/DSM501A/PM25_concentration";
 const char topicMQ135[] = "tele/MQ135/PPM_concentration";
 
-
 char uniqueid[32];
-
-unsigned long lpo_PM10 = 0;
-unsigned long lpo_PM25 = 0;
-unsigned long lpo_MQ135 = 0;
-
-unsigned long starttime;
-
-unsigned long sampletime_ms = 30000;
 
 WiFiClient wifiClient;
 MqttClient mqttClient(wifiClient);
-
+int i=0;
 void setup() {
 
 Serial.begin(9600);
+Serial.println("Starting please wait 30s");
+pinMode(PM1PIN,INPUT);
+pinMode(PM25PIN,INPUT);
 
 sprintf(uniqueid,"" ,ESP.getChipId());
 Serial.print("DeviceId:");
 Serial.println(uniqueid);
-
-pinMode(DUST_SENSOR_DIGITAL_PIN_PM10, INPUT);
-pinMode(DUST_SENSOR_DIGITAL_PIN_PM25, INPUT);
-
 
 Serial.print("Pokus o připojení k WPA SSID: ");
 Serial.println(ssid);
@@ -85,66 +81,69 @@ starttime = millis();
 
 }
 
-float getParticlemgm3(float r) {
-
-float mgm3 = 0.001915 * pow(r, 2) + 0.09522 * r - 0.04884;
-
-return mgm3 < 0.0 ? 0.0 : mgm3;
-
-}
-
 void sendMessage(const char *topic, float value) {
 
 char newtopic[128];
 
 sprintf(newtopic, topic, uniqueid);
-
 mqttClient.beginMessage(newtopic);
-
 mqttClient.println(value);
-
 mqttClient.endMessage();
 
+}
+
+float calculateConcentration(long lowpulseInMicroSeconds, long durationinSeconds){
+  
+  float ratio = (lowpulseInMicroSeconds/1000000.0)/30.0*100.0; //Calculate the ratio
+  float concentration = 0.001915 * pow(ratio,2) + 0.09522 * ratio - 0.04884;//Calculate the mg/m3
+  Serial.print("lowpulseoccupancy:");
+  Serial.print(lowpulseInMicroSeconds);
+  Serial.print("    ratio:");
+  Serial.print(ratio);
+  Serial.print("    Concentration:");
+  Serial.println(concentration);
+  return concentration;
 }
 
 void loop() {
 
 mqttClient.poll();
 
-lpo_PM10 += pulseIn(DUST_SENSOR_DIGITAL_PIN_PM10, LOW);
-lpo_PM25 += pulseIn(DUST_SENSOR_DIGITAL_PIN_PM25, LOW);
-
-unsigned long duration = millis() - starttime;
-
-if (duration > sampletime_ms) {
-
-float ratio = (lpo_PM10 - duration + sampletime_ms) / (sampletime_ms * 10.0); // Procento celého čísla 0=>100
-float concentration = 1.1 * pow(ratio, 3) - 3.8 * pow(ratio, 2) + 520 * ratio + 0.62; // krivka
-
-sendMessage(topicPM10p,getParticlemgm3(ratio));
-sendMessage(topicPM10c, concentration);
-
-ratio = (lpo_PM25 - duration + sampletime_ms) / (sampletime_ms * 10.0); // Procento celého čísla 0=>100
-concentration = 1.1 * pow(ratio, 3) - 3.8 * pow(ratio, 2) + 520 * ratio + 0.62; // krivka
-sendMessage(topicPM25p, getParticlemgm3(ratio));
-sendMessage(topicPM25c, concentration);
-
-lpo_PM10 = 0;
-lpo_PM25 = 0;
-
-//mq135------------------------
-
-
-  // načtení koncentrace plynů v ppm do proměnné
+  durationPM1 = pulseIn(PM1PIN, LOW);
+  durationPM25 = pulseIn(PM25PIN, LOW);
   
- float ppm = senzorMQ.getPPM();
+  lowpulseoccupancyPM1 += durationPM1;
+  lowpulseoccupancyPM25 += durationPM25;
+  
+  endtime = millis();
+  if ((endtime-starttime) > sampletime_ms) //Only after 30s has passed we calcualte the ratio
+  {
+    /*
+    ratio1 = (lowpulseoccupancy/1000000.0)/30.0*100.0; //Calculate the ratio
+    Serial.print("ratio1: ");
+    Serial.println(ratio1);
+    
+    concentration = 0.001915 * pow(ratio1,2) + 0.09522 * ratio1 - 0.04884;//Calculate the mg/m3
+    */
+    float conPM1 = calculateConcentration(lowpulseoccupancyPM1,30);
+    float conPM25 = calculateConcentration(lowpulseoccupancyPM25,30);
+    Serial.print("PM1 ");
+    Serial.print(conPM1);
+    Serial.print("  PM25 ");
+    Serial.println(conPM25);
+    sendMessage(topicPM10c, conPM1);
+    sendMessage(topicPM25c, conPM25);
+    lowpulseoccupancyPM1 = 0;
+    lowpulseoccupancyPM25 = 0;
+    
+//mq135------------------------------------------------
+  float ppm = senzorMQ.getPPM();
+      Serial.print("  PPM ");
+    Serial.println(ppm);
   sendMessage(topicMQ135, ppm);
-  Serial.print(ppm);
+
   ppm = 0;
   // pauza před dalším měřením
 starttime = millis();  
-}
-
-//mq135------------------------------------------------
-
+  } 
 }
